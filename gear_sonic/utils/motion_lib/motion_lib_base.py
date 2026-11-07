@@ -361,6 +361,27 @@ class MotionLibBase:
         # MuJoCo DOF indices for wrist joints (L/R roll/pitch/yaw)
         self.wrist_mujoco_dof_indices = [19, 20, 21, 26, 27, 28]
 
+    def _get_upper_body_pose_indices(self, num_poses):
+        """Convert robot augmentation DOFs to pose_aa slots, skipping the root.
+
+        Legacy mappings use the complement of the leg DOFs. Robots whose waist
+        must also stay fixed can supply an explicit arm-only DOF list.
+        """
+        indices = self.m_cfg.get("upper_body_augmentation_indices_mujoco")
+        if indices is None:
+            return [
+                i for i in range(1, num_poses) if i - 1 not in self.m_cfg.lower_joint_indices_mujoco
+            ]
+        indices = list(indices)
+        if any(
+            isinstance(i, bool) or not isinstance(i, (int, np.integer)) or not 0 <= i < num_poses - 1
+            for i in indices
+        ) or len(set(indices)) != len(indices):
+            raise ValueError("Upper-body augmentation DOFs must be unique integers within pose_aa bounds")
+        if set(indices).intersection(self.m_cfg.get("lower_joint_indices_mujoco", [])):
+            raise ValueError("Upper-body augmentation must not replace leg observation DOFs")
+        return [int(i) + 1 for i in indices]
+
     def load_data(self, motion_file):
         if osp.isfile(motion_file):
             self.mode = MotionlibMode.file
@@ -1825,9 +1846,7 @@ class MotionLibBase:
             ):
                 # ZL: this randomization is not combatiable with SMPL, so only for kinematic generated data.
                 # find the index for the upper body, skip the first index in pose_aa as it is the root.
-                upper_body_indices = [
-                    i for i in range(1, J) if i - 1 not in self.m_cfg.lower_joint_indices_mujoco
-                ]
+                upper_body_indices = self._get_upper_body_pose_indices(J)
                 # randomly select a motion from the non-navigation dataset
                 selected_file, selected_motion = random.choice(
                     list(self.res_non_nav_dataset.values())

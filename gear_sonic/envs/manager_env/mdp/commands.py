@@ -67,6 +67,49 @@ def _init_variable_frames(
     return per_env_num_frames, frame_choices
 
 
+def _resolve_lower_body_indices(mapping, joint_names=None):
+    """Resolve leg observation and augmentation DOFs from the robot mapping.
+
+    G1/H2 mappings without leg metadata retain their first 12 MuJoCo DOFs.
+    Explicit leg names validate both a spawned robot and offline DOF metadata.
+    """
+    mujoco_to_isaaclab = mapping["isaaclab_to_mujoco_dof"]
+    num_dof = len(mujoco_to_isaaclab)
+    if sorted(mujoco_to_isaaclab) != list(range(num_dof)):
+        raise ValueError("isaaclab_to_mujoco_dof must be a permutation of all DOF indices")
+
+    def validate(indices, label):
+        indices = list(indices)
+        if any(
+            isinstance(i, bool) or not isinstance(i, (int, np.integer)) or not 0 <= i < num_dof
+            for i in indices
+        ) or len(set(indices)) != len(indices):
+            raise ValueError(f"{label} must contain unique integer DOF indices in [0, {num_dof})")
+        return [int(i) for i in indices]
+
+    lower_mujoco = validate(
+        mapping.get("lower_joint_indices_mujoco", range(12)), "lower_joint_indices_mujoco"
+    )
+    if len(lower_mujoco) != 12:
+        raise ValueError("Leg observations require 12 DOFs: six for each leg")
+    lower_isaaclab = [mujoco_to_isaaclab[i] for i in lower_mujoco]
+    expected_names = mapping.get("lower_joint_names_mujoco")
+    if expected_names is not None:
+        names = joint_names if joint_names is not None else mapping.get("isaaclab_dof_names")
+        if names is None or max(lower_isaaclab) >= len(names):
+            raise ValueError("Leg-name validation requires the corresponding IsaacLab DOF names")
+        actual_names = [names[i] for i in lower_isaaclab]
+        if actual_names != list(expected_names):
+            raise ValueError(f"Leg DOF mapping mismatch: expected {list(expected_names)}, got {actual_names}")
+
+    upper_mujoco = mapping.get("upper_body_augmentation_indices_mujoco")
+    if upper_mujoco is not None:
+        upper_mujoco = validate(upper_mujoco, "upper_body_augmentation_indices_mujoco")
+        if set(upper_mujoco).intersection(lower_mujoco):
+            raise ValueError("Upper-body augmentation must not replace leg observation DOFs")
+    return lower_mujoco, lower_isaaclab, upper_mujoco
+
+
 @configclass
 class CommandsCfg:
     """Command specifications for the MDP."""
@@ -173,10 +216,11 @@ class TrackingCommand(CommandTerm):
 
         self.isaaclab_to_mujoco_dof = env.cfg.isaaclab_to_mujoco_mapping["isaaclab_to_mujoco_dof"]
         self.mujoco_to_isaaclab_dof = env.cfg.isaaclab_to_mujoco_mapping["mujoco_to_isaaclab_dof"]
-        self.lower_joint_indices_mujoco = list(range(12))
-        self.lower_joint_isaaclab_indices = [
-            self.isaaclab_to_mujoco_dof[i] for i in self.lower_joint_indices_mujoco
-        ]
+        (
+            self.lower_joint_indices_mujoco,
+            self.lower_joint_isaaclab_indices,
+            self.upper_body_augmentation_indices_mujoco,
+        ) = _resolve_lower_body_indices(env.cfg.isaaclab_to_mujoco_mapping, self.robot.joint_names)
         self.isaaclab_to_mujoco_body = env.cfg.isaaclab_to_mujoco_mapping["isaaclab_to_mujoco_body"]
         self.mujoco_to_isaaclab_body = env.cfg.isaaclab_to_mujoco_mapping["mujoco_to_isaaclab_body"]
         self.running_ref_root_height = torch.zeros(
@@ -217,6 +261,7 @@ class TrackingCommand(CommandTerm):
                 "body_indexes_data": self.body_indexes_data,
                 "filter_motion_keys": filter_keys,
                 "lower_joint_indices_mujoco": self.lower_joint_indices_mujoco,
+                "upper_body_augmentation_indices_mujoco": self.upper_body_augmentation_indices_mujoco,
                 "cat_upper_body_poses": self.cfg.cat_upper_body_poses,
                 "cat_upper_body_poses_prob": self.cfg.cat_upper_body_poses_prob,
                 "randomize_heading": self.cfg.randomize_heading,
@@ -580,6 +625,7 @@ class TrackingCommand(CommandTerm):
         cls,
         motion_lib_cfg,
         device,
+        isaaclab_to_mujoco_mapping=None,
     ):
         """Create a MotionCommand without env/sim for offline kinematic use.
 
@@ -590,6 +636,9 @@ class TrackingCommand(CommandTerm):
         Expected keys in motion_lib_cfg:
             num_future_frames: Number of future reference frames.
             dt_future_ref_frames: Time delta between future reference frames (seconds).
+
+        Pass the robot's isaaclab_to_mujoco_mapping for non-G1 robots, e.g.
+        ELF3Converter().get_isaaclab_to_mujoco_mapping(). Omitting it retains G1.
         """
         inst = object.__new__(cls)
         inst._offline = True  # noqa: SLF001
@@ -619,13 +668,23 @@ class TrackingCommand(CommandTerm):
         # Inject body/DOF mapping into motion_lib_cfg so motion_lib handles
         # body reordering and xyzw→wxyz quaternion conversion at load time.
 
-        isaaclab_to_mujoco_mapping = order_converter.G1Converter().get_isaaclab_to_mujoco_mapping()
+        if isaaclab_to_mujoco_mapping is None:
+            isaaclab_to_mujoco_mapping = order_converter.G1Converter().get_isaaclab_to_mujoco_mapping()
+        inst.isaaclab_to_mujoco_dof = isaaclab_to_mujoco_mapping["isaaclab_to_mujoco_dof"]
+        inst.mujoco_to_isaaclab_dof = isaaclab_to_mujoco_mapping["mujoco_to_isaaclab_dof"]
+        (
+            inst.lower_joint_indices_mujoco,
+            inst.lower_joint_isaaclab_indices,
+            inst.upper_body_augmentation_indices_mujoco,
+        ) = _resolve_lower_body_indices(isaaclab_to_mujoco_mapping)
         motion_lib_cfg.update(
             {
                 "mujoco_to_isaaclab_body": isaaclab_to_mujoco_mapping["mujoco_to_isaaclab_body"],
                 "mujoco_to_isaaclab_dof": isaaclab_to_mujoco_mapping["mujoco_to_isaaclab_dof"],
                 "isaaclab_to_mujoco_body": isaaclab_to_mujoco_mapping["isaaclab_to_mujoco_body"],
                 "isaaclab_to_mujoco_dof": isaaclab_to_mujoco_mapping["isaaclab_to_mujoco_dof"],
+                "lower_joint_indices_mujoco": inst.lower_joint_indices_mujoco,
+                "upper_body_augmentation_indices_mujoco": inst.upper_body_augmentation_indices_mujoco,
             }
         )
         # body_indexes_data: same logic as __init__ — use body_names to select
@@ -670,16 +729,6 @@ class TrackingCommand(CommandTerm):
         else:
             inst.motion_anchor_body_index = 0  # Default to root
         inst.num_bodies = len(motion_lib_cfg.body_indexes_data)
-
-        # DOF mapping
-        if isaaclab_to_mujoco_mapping is not None:
-            inst.isaaclab_to_mujoco_dof = isaaclab_to_mujoco_mapping["isaaclab_to_mujoco_dof"]
-            inst.mujoco_to_isaaclab_dof = isaaclab_to_mujoco_mapping["mujoco_to_isaaclab_dof"]
-        inst.lower_joint_indices_mujoco = list(range(12))
-        if hasattr(inst, "isaaclab_to_mujoco_dof"):
-            inst.lower_joint_isaaclab_indices = [
-                inst.isaaclab_to_mujoco_dof[i] for i in inst.lower_joint_indices_mujoco
-            ]
 
         # Variable frame support (offline)
         inst.variable_frames_enabled = motion_lib_cfg.get("variable_frames_enabled", False)

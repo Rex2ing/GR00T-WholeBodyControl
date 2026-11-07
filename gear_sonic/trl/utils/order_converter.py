@@ -202,6 +202,68 @@ class H2Converter(IsaacLabMuJoCoConverter):
     FOOT_BODY_NAMES = ["left_ankle_roll_link", "right_ankle_roll_link"]
 
 
+class ELF3Converter(IsaacLabMuJoCoConverter):
+    """ELF3 29-DOF / 30-body ordering converter.
+
+    Uses the robot configuration's verified IsaacLab order and MuJoCo DFS
+    mappings. Fixed head/sensor links are already merged into the torso.
+    """
+
+    def __init__(self):
+        # Keep IsaacLab imports lazy, as for G1/H2, to avoid the mdp import cycle.
+        from gear_sonic.envs.manager_env.robots.elf3 import (
+            ELF3_ISAACLAB_TO_MUJOCO_MAPPING,
+        )
+
+        self._mapping = {
+            name: list(values) for name, values in ELF3_ISAACLAB_TO_MUJOCO_MAPPING.items()
+        }
+        self.JOINT_NAMES = self._mapping["isaaclab_joints"]
+        self.DOF_MAPPINGS = {
+            ("isaaclab", "mujoco"): self._mapping["isaaclab_to_mujoco_dof"],
+            ("mujoco", "isaaclab"): self._mapping["mujoco_to_isaaclab_dof"],
+        }
+        self.BODY_MAPPINGS = {
+            ("isaaclab", "mujoco"): self._mapping["isaaclab_to_mujoco_body"],
+            ("mujoco", "isaaclab"): self._mapping["mujoco_to_isaaclab_body"],
+        }
+
+    VR_3POINTS_BODY_NAMES = ["torso_link", "l_wrist_z_link", "r_wrist_z_link"]
+    FOOT_BODY_NAMES = ["l_ankle_x_link", "r_ankle_x_link"]
+
+    @property
+    def vr_3points_mujoco_indices(self):
+        """Torso and wrist indices in the full 30-body MuJoCo array."""
+        names = [self.JOINT_NAMES[i] for i in self.isaaclab_to_mujoco_body]
+        return [names.index(name) for name in self.VR_3POINTS_BODY_NAMES]
+
+    @property
+    def foot_mujoco_indices(self):
+        """Foot indices in the full 30-body MuJoCo array."""
+        names = [self.JOINT_NAMES[i] for i in self.isaaclab_to_mujoco_body]
+        return [names.index(name) for name in self.FOOT_BODY_NAMES]
+
+    @property
+    def isaaclab_to_mujoco_dof(self):
+        return self.DOF_MAPPINGS[("isaaclab", "mujoco")]
+
+    @property
+    def mujoco_to_isaaclab_dof(self):
+        return self.DOF_MAPPINGS[("mujoco", "isaaclab")]
+
+    @property
+    def isaaclab_to_mujoco_body(self):
+        return self.BODY_MAPPINGS[("isaaclab", "mujoco")]
+
+    @property
+    def mujoco_to_isaaclab_body(self):
+        return self.BODY_MAPPINGS[("mujoco", "isaaclab")]
+
+    def get_isaaclab_to_mujoco_mapping(self):
+        """Return fresh mapping lists, including DOF names and ELF3 leg indices."""
+        return {name: list(values) for name, values in self._mapping.items()}
+
+
 def load_qpos_from_csv(csv_path: str) -> torch.Tensor:
     """Load qpos [T, D] from CSV."""
     import pandas as pd

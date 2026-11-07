@@ -1,0 +1,74 @@
+# @package _global_
+# ELF3 body-name overrides for SONIC v1.1 (29 DOF, 30 merged bodies).
+# This adapts configuration names; commands.py still needs its ELF3 port.
+
+defaults:
+  - /exp/manager/universal_token/all_modes/sonic_v1_1
+  - _self_
+
+project_name: TRL_ELF3_Track
+
+manager_env:
+  config:
+    robot:
+      type: elf3
+
+  commands:
+    motion:
+      # The pelvis is below the three waist joints. torso_link is the root.
+      anchor_body: "waist_z_link"
+      body_names:
+        - "waist_z_link"
+        - "l_hip_x_link"
+        - "l_knee_y_link"
+        - "l_ankle_x_link"
+        - "r_hip_x_link"
+        - "r_knee_y_link"
+        - "r_ankle_x_link"
+        - "torso_link"
+        - "l_shoulder_x_link"
+        - "l_elbow_y_link"
+        - "l_wrist_z_link"
+        - "r_shoulder_x_link"
+        - "r_elbow_y_link"
+        - "r_wrist_z_link"
+      feet_body_names: ["l_ankle_x_link", "r_ankle_x_link"]
+      # Preserve the command's left wrist / right wrist / torso point order.
+      vr_3point_body: ["l_wrist_z_link", "r_wrist_z_link", "torso_link"]
+      reward_point_body: ["torso_link", "l_wrist_z_link", "r_wrist_z_link"]
+      # Point offsets remain inherited from SONIC and need ELF3 calibration.
+
+      motion_lib_cfg:
+        asset:
+          assetFileName: "elf3.xml"
+        # Supply ELF3-retargeted robot motions and the matching SMPL data.
+        motion_file: null
+        smpl_motion_file: null
+
+  terminations:
+    # Both the regular and adaptive ee_body_pos terms use this config key.
+    ee_body_pos:
+      params:
+        body_names:
+          - "l_ankle_x_link"
+          - "r_ankle_x_link"
+          - "l_wrist_z_link"
+          - "r_wrist_z_link"
+    foot_pos_xyz:
+      params:
+        body_names: ["l_ankle_x_link", "r_ankle_x_link"]
+
+  rewards:
+    anti_shake_ang_vel:
+      params:
+        # ELF3 has no separate head body after fixed-link merging.
+        body_names: ["l_wrist_z_link", "r_wrist_z_link"]
+    tracking_vr_2wrists_local_ori:
+      params:
+        body_names: ["l_wrist_z_link", "r_wrist_z_link"]
+    undesired_contacts:
+      params:
+        sensor_cfg:
+          # Allow feet, wrists and elbows, as in the original SONIC term.
+          body_names:
+            - "^(?!l_ankle_x_link$)(?!r_ankle_x_link$)(?!l_wrist_z_link$)(?!r_wrist_z_link$)(?!l_elbow_y_link$)(?!r_elbow_y_link$).+$"
