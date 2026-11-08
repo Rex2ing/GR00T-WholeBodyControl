@@ -222,3 +222,4 @@ sonic_release/
 
 # Local ELF3 models and motion data
 /elf3/
+/gear_sonic/data/elf3_amass/

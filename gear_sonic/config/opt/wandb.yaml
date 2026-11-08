@@ -4,7 +4,8 @@ use_wandb: True
 
 wandb:
   wandb_project: null
-  wandb_tags: 'online' # 'online' or 'offline' or 'disabled'
+  wandb_tags: 'online' # Legacy field; does not select the SDK logging mode.
+  wandb_mode: null # online, offline, disabled; null uses the SDK default.
   wandb_group: null
   wandb_id: null
   wandb_entity: null

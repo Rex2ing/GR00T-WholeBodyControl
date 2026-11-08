@@ -1,31 +1,75 @@
 # @package _global_
-# ELF3 body-name overrides for SONIC v1.1 (29 DOF, 30 merged bodies).
-# This adapts configuration names; commands.py still needs its ELF3 port.
+# Copied from sonic_release.yaml, with ELF3-specific overrides below.
+# 29 DOF / 30 bodies; robot and teleop input on converted AMASS.
+# The legacy "g1" encoder key denotes ELF3 robot-trajectory input here.
 
 defaults:
-  - /exp/manager/universal_token/all_modes/sonic_v1_1
-  - _self_
+  - /algo: ppo_im_phc
+  - /manager_env: base_env
+  - /callbacks/read_eval
+  - /callbacks/im_resample
+  - /aux_losses: universal_token/g1_recon_and_all_latent
+  - override /trainer: trl_ppo_aux
+  - override /actor_critic: universal_token/all_mlp_v1
+  - override /manager_env/observations/tokenizer: unitoken_all_noz
+  - override /manager_env/observations/policy: local_dir_hist
+  - override /manager_env/observations/critic: privileged_mf_hist
+  - override /manager_env/events: tracking/level0_4
+  - override /manager_env/terminations: tracking/base_adaptive_strict_ori_foot_xyz
+  - override /manager_env/rewards: tracking/base_5point_local_feet_acc
 
+use_manager_env: true
+
+exp_base: ${hydra:runtime.choices.exp}
+exp_var: test
+experiment_name: ${exp_base}_${exp_var}
+experiment_dir: ${base_dir}/${project_name}/${experiment_name}-${timestamp}
+
+num_envs: 4096
 project_name: TRL_ELF3_Track
 
+# Keep metrics locally so cloud connectivity does not block ELF3 training.
+# Override with wandb.wandb_mode=online or WANDB_MODE=online when needed.
+wandb:
+  wandb_mode: offline
+  wandb_dir: ${experiment_dir}
+
+actor_prop_history_length: 10
+actor_actions_history_length: 10
+
+critic_prop_history_length: 10
+critic_actions_history_length: 10
+
 manager_env:
+  rewards:
+    feet_acc:
+      weight: -2.5e-6
+    anti_shake_ang_vel:
+      params:
+        # The fixed head is merged; penalize the two wrist bodies.
+        body_names: ["l_wrist_z_link", "r_wrist_z_link"]
+    undesired_contacts:
+      params:
+        sensor_cfg:
+          body_names:
+            - "^(?!l_ankle_x_link$)(?!r_ankle_x_link$)(?!l_wrist_z_link$)(?!r_wrist_z_link$)(?!l_elbow_y_link$)(?!r_elbow_y_link$).+$"
   config:
     robot:
       type: elf3
-
+    terrain_type: plane
   commands:
     motion:
-      # The pelvis is below the three waist joints. torso_link is the root.
-      anchor_body: "waist_z_link"
+      # The free-root body must be the first tracked body for the motion library.
+      anchor_body: "torso_link"
       body_names:
-        - "waist_z_link"
+        - "torso_link"
         - "l_hip_x_link"
         - "l_knee_y_link"
         - "l_ankle_x_link"
         - "r_hip_x_link"
         - "r_knee_y_link"
         - "r_ankle_x_link"
-        - "torso_link"
+        - "waist_z_link"
         - "l_shoulder_x_link"
         - "l_elbow_y_link"
         - "l_wrist_z_link"
@@ -33,20 +77,58 @@ manager_env:
         - "r_elbow_y_link"
         - "r_wrist_z_link"
       feet_body_names: ["l_ankle_x_link", "r_ankle_x_link"]
-      # Preserve the command's left wrist / right wrist / torso point order.
       vr_3point_body: ["l_wrist_z_link", "r_wrist_z_link", "torso_link"]
       reward_point_body: ["torso_link", "l_wrist_z_link", "r_wrist_z_link"]
-      # Point offsets remain inherited from SONIC and need ELF3 calibration.
+      # Point offsets are the release defaults and still need ELF3 calibration.
+      reward_point_body_offset: [[0.0, 0.0, 0.5], [0.0, -0.0, 0.0], [0.0, -0.0, 0.0]]
+      num_future_frames: 10
+      dt_future_ref_frames: 0.1
+      smpl_num_future_frames: 10
+      smpl_dt_future_ref_frames: 0.02
+      # AMASS references are already retargeted/filtered, not planner motions.
+      cat_upper_body_poses: false
+      cat_upper_body_poses_prob: 0.5
+
+      freeze_frame_aug: true
+      teleop_sample_prob_when_smpl: 0.0
+      encoder_sample_probs:
+        g1: 1.0
+        teleop: 1.0
+        smpl: 0.0
+      waist_joints: ["waist_y_joint", "waist_x_joint", "waist_z_joint"]
+      left_eef_deps:
+        ["l_shoulder_y_joint", "l_shoulder_x_joint", "l_shoulder_z_joint", "l_elbow_y_joint",
+         "l_wrist_x_joint", "l_wrist_y_joint", "l_wrist_z_joint"]
+      right_eef_deps:
+        ["r_shoulder_y_joint", "r_shoulder_x_joint", "r_shoulder_z_joint", "r_elbow_y_joint",
+         "r_wrist_x_joint", "r_wrist_y_joint", "r_wrist_z_joint"]
 
       motion_lib_cfg:
+        upper_body_augment_prefixes: []
+        adaptive_sampling:
+          adp_samp_failure_rate_max_over_mean: 200
         asset:
+          assetRoot: "gear_sonic/data/assets/robot_description/mjcf/"
           assetFileName: "elf3.xml"
-        # Supply ELF3-retargeted robot motions and the matching SMPL data.
-        motion_file: null
-        smpl_motion_file: null
+        motion_file: "gear_sonic/data/elf3_amass"
+        # Placeholder observations only; no real SMPL data is used or generated.
+        smpl_motion_file: dummy
+        smpl_y_up: true
+
+  observations:
+    tokenizer:
+      joint_pos_multi_future_wrist_for_smpl:
+        params:
+          # IsaacLab order: L/R wrist X, L/R wrist Y, L/R wrist Z.
+          joints_idx: [13, 14, 17, 18, 21, 22]
+
+  events:
+    randomize_rigid_body_mass:
+      params:
+        asset_cfg:
+          body_names: ["torso_link", "l_wrist_z_link", "r_wrist_z_link"]
 
   terminations:
-    # Both the regular and adaptive ee_body_pos terms use this config key.
     ee_body_pos:
       params:
         body_names:
@@ -58,17 +140,39 @@ manager_env:
       params:
         body_names: ["l_ankle_x_link", "r_ankle_x_link"]
 
-  rewards:
-    anti_shake_ang_vel:
-      params:
-        # ELF3 has no separate head body after fixed-link merging.
-        body_names: ["l_wrist_z_link", "r_wrist_z_link"]
-    tracking_vr_2wrists_local_ori:
-      params:
-        body_names: ["l_wrist_z_link", "r_wrist_z_link"]
-    undesired_contacts:
-      params:
-        sensor_cfg:
-          # Allow feet, wrists and elbows, as in the original SONIC term.
-          body_names:
-            - "^(?!l_ankle_x_link$)(?!r_ankle_x_link$)(?!l_wrist_z_link$)(?!r_wrist_z_link$)(?!l_elbow_y_link$)(?!r_elbow_y_link$).+$"
+algo:
+  config:
+    empty_cache_every_n_ppo_epoch: -1
+    num_steps_per_env: 24
+    use_clampped_std: true
+    std_clamp_min: 0.001
+    std_clamp_max: 0.5
+    max_grad_norm: 0.1
+    actor:
+      backbone:
+        reencode_smpl_g1_recon: false
+        aux_loss_coef:
+          g1_smpl_latent: 0.0
+          teleop_smpl_latent: 0.0
+          reencoded_smpl_g1_latent: 0.0
+        encoders:
+          g1:
+            inputs: ["command_multi_future_nonflat", "motion_anchor_ori_b_mf_nonflat"]
+          teleop:
+            inputs:
+              [
+                "command_multi_future_lower_body",
+                "vr_3point_local_target",
+                "vr_3point_local_orn_target",
+                "motion_anchor_ori_b",
+              ]
+          smpl:
+            inputs:
+              [
+                "smpl_joints_multi_future_local_nonflat",
+                "smpl_root_ori_b_multi_future",
+                "joint_pos_multi_future_wrist_for_smpl",
+              ]
+        decoders:
+          g1_kin:
+            outputs: ["command_multi_future_nonflat", "motion_anchor_ori_b_mf_nonflat"]

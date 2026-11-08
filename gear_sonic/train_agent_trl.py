@@ -221,6 +221,7 @@ def main(config: OmegaConf):
             id=config.wandb.wandb_id,
             group=wandb_group,
             resume="allow",
+            mode=os.environ.get("WANDB_MODE") or config.wandb.get("wandb_mode", None),
         )
 
     # Setup simulator similar to train_agent.py
