@@ -1,0 +1,22 @@
+# Opt-in ELF3 metric groups; the default im_eval callback keeps its G1 groups.
+im_eval:
+  _target_: gear_sonic.trl.callbacks.im_eval_callback.ImEvalCallback
+  eval_frequency: 1
+  eval_only: true
+  output_dir: ${experiment_dir}/eval_metrics
+  body_subsets:
+    legs:
+      - l_hip_x_link
+      - l_knee_y_link
+      - l_ankle_x_link
+      - r_hip_x_link
+      - r_knee_y_link
+      - r_ankle_x_link
+    vr_3points: [torso_link, l_wrist_z_link, r_wrist_z_link]
+    other_upper_bodies:
+      - waist_z_link
+      - l_shoulder_x_link
+      - l_elbow_y_link
+      - r_shoulder_x_link
+      - r_elbow_y_link
+    foot: [l_ankle_x_link, r_ankle_x_link]

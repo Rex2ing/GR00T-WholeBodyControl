@@ -58,6 +58,7 @@ cover/
 local_settings.py
 db.sqlite3
 db.sqlite3-journal
+gear_sonic/scripts/plot_training_runs.py
 
 # Flask stuff:
 instance/
@@ -223,3 +224,4 @@ sonic_release/
 # Local ELF3 models and motion data
 /elf3/
 /gear_sonic/data/elf3_amass/
+gear_sonic/config/exp/manager/universal_token/all_modes/sonic_elf3.yaml

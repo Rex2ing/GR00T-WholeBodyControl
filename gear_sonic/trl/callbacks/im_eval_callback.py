@@ -108,7 +108,8 @@ class ImEvalCallback(TrainerCallback):
     """Callback to evaluate motion imtiation during training. Supports multigpu ."""
 
     def __init__(
-        self, eval_frequency, empty_cache_freq=20, eval_only=False, output_dir=None, log_keys=None
+        self, eval_frequency, empty_cache_freq=20, eval_only=False, output_dir=None, log_keys=None,
+        body_subsets=None,
     ):
         super().__init__()
         self.eval_frequency = eval_frequency
@@ -118,6 +119,7 @@ class ImEvalCallback(TrainerCallback):
         self.in_eval_mode = False
         self.render_only = False
         self.log_keys = log_keys
+        self.body_subsets = body_subsets
         self._has_object = False
 
     def on_step_end(self, args, state, control, **kwargs):
@@ -569,6 +571,12 @@ class ImEvalCallback(TrainerCallback):
                 ]
 
                 foot_subset_names = ["left_ankle_roll_link", "right_ankle_roll_link"]
+
+                if self.body_subsets is not None:
+                    legs_subset_names = self.body_subsets["legs"]
+                    vr_3points_subset_names = self.body_subsets["vr_3points"]
+                    other_upper_bodies_subset_names = self.body_subsets["other_upper_bodies"]
+                    foot_subset_names = self.body_subsets["foot"]
 
                 # Get indices for subsets
                 legs_indices = [body_names.index(name) for name in legs_subset_names]

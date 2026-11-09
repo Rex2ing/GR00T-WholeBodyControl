@@ -1,6 +1,6 @@
 # @package _global_
 # Copied from sonic_release.yaml, with ELF3-specific overrides below.
-# 29 DOF / 30 bodies; robot and teleop input on converted AMASS.
+# 29 DOF / 30 bodies; robot-motion-only input on converted AMASS.
 # The legacy "g1" encoder key denotes ELF3 robot-trajectory input here.
 
 defaults:
@@ -8,7 +8,7 @@ defaults:
   - /manager_env: base_env
   - /callbacks/read_eval
   - /callbacks/im_resample
-  - /aux_losses: universal_token/g1_recon_and_all_latent
+  - /aux_losses/terms/g1_recon@algo.config.actor.backbone.aux_loss_func
   - override /trainer: trl_ppo_aux
   - override /actor_critic: universal_token/all_mlp_v1
   - override /manager_env/observations/tokenizer: unitoken_all_noz
@@ -21,7 +21,7 @@ defaults:
 use_manager_env: true
 
 exp_base: ${hydra:runtime.choices.exp}
-exp_var: test
+exp_var: v1_motionEncOnly
 experiment_name: ${exp_base}_${exp_var}
 experiment_dir: ${base_dir}/${project_name}/${experiment_name}-${timestamp}
 
@@ -93,7 +93,7 @@ manager_env:
       teleop_sample_prob_when_smpl: 0.0
       encoder_sample_probs:
         g1: 1.0
-        teleop: 1.0
+        teleop: 0.0
         smpl: 0.0
       waist_joints: ["waist_y_joint", "waist_x_joint", "waist_z_joint"]
       left_eef_deps:
@@ -150,11 +150,10 @@ algo:
     max_grad_norm: 0.1
     actor:
       backbone:
+        active_encoders: ["g1"]
         reencode_smpl_g1_recon: false
         aux_loss_coef:
-          g1_smpl_latent: 0.0
-          teleop_smpl_latent: 0.0
-          reencoded_smpl_g1_latent: 0.0
+          g1_recon: 0.01
         encoders:
           g1:
             inputs: ["command_multi_future_nonflat", "motion_anchor_ori_b_mf_nonflat"]
